@@ -1,0 +1,472 @@
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+  <title>Foggy garden</title>
+  <script src="./Foggy garden_files/plant.js" type="text/javascript"></script>
+  <script src="./Foggy garden_files/CanvasMatrix.js" type="text/javascript"></script>
+  <script src="./Foggy garden_files/Controls.js" type="text/javascript"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" type="text/javascript"></script>
+
+<script type="text/javascript">
+    // Function to hide splash screen and display WebGL canvas
+    function showWebGLCanvas() {
+        document.getElementById('splashScreen').style.display = 'none';
+        document.getElementById('webGLCanvas').style.display = 'block';
+        webGLStart(); // Start WebGL content
+    }
+
+    // Simulate loading delay
+    setTimeout(showWebGLCanvas, 3000); // Adjust the delay time as needed
+</script>
+
+<script id="vs-show" type="x-shader/x-vertex"> 
+  attribute vec3 aPos;
+  attribute vec3 aCol;
+  attribute vec4 ai; // x, sin, z, cos
+  uniform vec2 r0;
+  uniform mat4 mvMatrix;
+  varying vec3 color;
+void main(void) {
+   float x = aPos.x*ai.y + aPos.z*ai.w + ai.x,
+     z = -aPos.x*ai.w + aPos.z*ai.y + ai.z;
+   gl_Position = mvMatrix * vec4(x, aPos.y, z, 1.);
+   color = aCol;
+   color = mix(vec3(.9,.95,1.), color,
+     clamp(.03*(50. - length(vec2(x,z) - r0)), 0., 1.));  // fog
+}
+</script> 
+ 
+<script id="fs-show" type="x-shader/x-fragment"> 
+precision mediump float;
+  varying vec3 color;
+void main(void) {
+   gl_FragColor = vec4(color, 1.);
+}
+</script> 
+ 
+<script type="text/javascript"> 
+
+var prMatrix, mvMat, mvMatLoc, rotMat, ext,  c_w, c_h,
+  xb = 0, zb = 80,  readyFrame = true;
+function webGLStart() {
+   initGL();
+   var err = "Your browser does not support ";
+   try { ext = gl.getExtension("ANGLE_instanced_arrays");
+   } catch(e) {}
+   if ( !ext ) {alert(err + "ANGLE_instanced_arrays"); return;}
+   transl = 0;
+   c_w = Math.round(.95*window.innerWidth);  c_h = window.innerHeight - 10;
+   canvas.width = c_w;   canvas.height = c_h;
+   gl.viewport(0, 0, c_w, c_h);
+
+   pt = new Float32Array(400000);  ind = new Uint16Array(400000);
+
+   apple_tree(0,0,0);
+
+   prog_show  = gl.createProgram();
+   gl.attachShader(prog_show, getShader( gl, "vs-show" ));
+   gl.attachShader(prog_show, getShader( gl, "fs-show" ));
+   gl.linkProgram(prog_show);
+   gl.useProgram(prog_show);
+   r0_loc = gl.getUniformLocation(prog_show, "r0")
+
+   var posLocation = gl.getAttribLocation(prog_show, "aPos");
+   var colLocation = gl.getAttribLocation(prog_show, "aCol");
+   gl.enableVertexAttribArray( posLocation );
+   gl.enableVertexAttribArray( colLocation );
+
+   var pti = new Float32Array(4*40),  t = 0;
+   for (var j = -1.5; j < 2; j++)
+     for (var i = -4.5; i < 5; i++){
+       var fi = 6.28*Math.random(),  sc = .9 + .2*Math.random();
+       pti[t++] = 20*j + 3*Math.random();
+       pti[t++] = sc*Math.cos(fi);
+       pti[t++] = 20*i + 3*Math.random();
+       pti[t++] = sc*Math.sin(fi);}
+   var IposLocation = gl.getAttribLocation(prog_show, "ai");
+   gl.enableVertexAttribArray( IposLocation );
+   gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+   gl.bufferData(gl.ARRAY_BUFFER, pti, gl.STATIC_DRAW);
+   gl.vertexAttribPointer(IposLocation, 4, gl.FLOAT, false, 0, 0);
+   ext.vertexAttribDivisorANGLE(IposLocation, 1);
+
+   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.createBuffer());
+   prMatrix = new CanvasMatrix4();
+   prMatrix.perspective(50, c_w/c_h, .05, 500);
+   mvMatrix = new CanvasMatrix4();
+   rotMat = new CanvasMatrix4();
+   rotMat.makeIdentity();
+//   rotMat.rotate(180, 0,1,0);
+   mvMatLoc = gl.getUniformLocation(prog_show,"mvMatrix");
+
+   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, ind, gl.STATIC_DRAW);
+   gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+   gl.vertexAttribPointer(posLocation, 3, gl.FLOAT, false, 24, 0);
+   gl.vertexAttribPointer(colLocation, 3, gl.FLOAT, false, 24, 12);
+   gl.bufferData(gl.ARRAY_BUFFER, pt, gl.STATIC_DRAW);
+   gl.enable(gl.DEPTH_TEST);
+   gl.clearColor(.9, .95, 1., 1);
+
+   drawFrame()
+
+function apple_tree(tx,ty,tz){
+   var mp = 4, ms = 3, n = 3, smp = 6, snp = 5, sms = 5, sns = 5;
+   var cp_p = new Float32Array([   // petal
+     .03,.3,.0,.0,
+      0,.4,.6,.6,
+     .03,.3,.1,.0,
+     1,1,1,1, .5,.5,.5,.5, .5,.5,.5,.5
+   ]);
+   var cp_s = new Float32Array([   // sepal
+     .03,.35,.0,
+    -.01,.35,.65,
+     .03,.35,.0,
+     0,0,0, .5,.5,.6, 0,0,0
+   ]);
+   var Bm_p = new Float32Array(mp*smp);
+   var Bm_s = new Float32Array(ms*sms);
+   var pet = new Float32Array(6*smp);
+   BezierFunc(mp, smp, Bm_p);
+   BezierFunc(ms, sms, Bm_s);
+   var ml = 3, sml = 7, snl = 5;
+   var Bm_l = new Float32Array(ml*sml),  Bn_l = new Float32Array(n*snl);
+   BezierFunc(ml, sml, Bm_l);
+   BezierFunc(n, snl, Bn_l);
+
+   var off0 = off;
+   branch3();
+   rotX_p( -1., off0, off, pt);
+   translate_p( 0,3,0, off0, off, pt);
+
+   off0 = off;
+   branch3();
+   rotX_p( -1., off0, off, pt);
+   rotY_p( -2.1, off0, off, pt);
+   translate_p( 0,4,0, off0, off, pt);
+
+   off0 = off;
+   branch3();
+   rotX_p( -1., off0, off, pt);
+   rotY_p( 2.1, off0, off, pt);
+   translate_p( 0,5,0, off0, off, pt);
+
+   off0 = off;
+   branch3();
+   rotY_p( 1.1, off0, off, pt);
+   translate_p( 0,6,0, off0, off, pt);
+
+   trunk( 6, 4, 2);
+
+   var t = off/6, i = 0,  r = 14; // ground
+   var gr = [-r,-.2,-r, r,.1,-r, -r,-.1,r, r,.05,r];
+   for(var j = 0; j < 4; j++ ){
+     pt[off++] = gr[i++];  pt[off++] = gr[i++];  pt[off++] = gr[i++];
+     pt[off++] = 1;  pt[off++] = .6;  pt[off++] = .2;}
+   ind[pi++] = t;  ind[pi++] = t+1;  ind[pi++] = t+2;
+   ind[pi++] = t+1;  ind[pi++] = t+2;  ind[pi++] = t+3;
+
+   for(var j = -9; j < 10; j += 1.5 )
+     for(var i = -9; i < 10; i += 1.5 )
+       grass(i + Math.random(), 0, j + Math.random(), Math.random());
+
+function grass(tx,ty,tz, rot){
+   var z = .05;
+   var cp = new Float32Array([
+     -.3,-1.,-.1, .1,.1, 1.2,.3,
+     0,1.8,0, 2 + Math.random(),0, 1 + Math.random(),0,
+     z,z-.4,z, z+.4,z, z-.6,z,
+     0,0,0, 0,0, 0,0,
+     .7,1,Math.random(), 1,Math.random(), 1,Math.random(),
+     0,0,0, 0,0, 0,0]);
+   var t = off/6, fi  = rot;
+   for(var j = 0; j < 3; j++ ){
+     rotY( rot, 7, cp); rot = 2.1;
+     for(var i = 0; i < 7; i++ ){
+       pt[off++] = cp[i] + tx;  pt[off++] = cp[i+7] + ty;  pt[off++] = cp[i+14] + tz;
+       pt[off++] = cp[i+21];  pt[off++] = cp[i+28];  pt[off++] = cp[i+35];}
+     ind[pi++] = t++; ind[pi++] = t++;  ind[pi++] = t;
+     ind[pi++] = t++; ind[pi++] = t++;  ind[pi++] = t;
+     ind[pi++] = t++; ind[pi++] = t++;  ind[pi++] = t++;
+   }
+}
+//alert(off/6)
+
+function branch3(){
+   var off0 = off;
+   branch(3.75, 1);
+   rotX_p( -1., off0, off, pt);
+   translate_p( 0,1.,0, off0, off, pt);
+
+   off0 = off;
+   branch(3.75, 1);
+   rotX_p( -1., off0, off, pt);
+   rotY_p( -2.4, off0, off, pt);
+   translate_p( 0,3.4,0, off0, off, pt);
+
+   off0 = off;
+   branch(2.5, 1);
+   rotX_p( -1.2, off0, off, pt);
+   rotY_p( -4.8, off0, off, pt);
+   translate_p( 0,6.3,0, off0, off, pt);
+
+   branch(10, 2);
+}
+
+function branch(h, sc0){
+   var g = .8,  mn = ml*n;
+   var cp_l = new Float32Array([    // leaves
+     0,.7,1.5, 0,.7,1.5, 0,.7,1.5,
+     0,.5,0, 0,0,0, 0,.5,0, 
+     0,-1,0, 0,0,0, 0,1,0,
+     0,0,0, 0,0,0, 0,0,0,  g,g,g, .3,.5,g, g,g,g,  0,0,0, 0,0,0, 0,0,0]);
+   rotZ( -.5, mn, cp_l);
+   var fi = 0; // 6*Math.random();
+   rotY( fi, mn, cp_l);
+   translate( 0, 1.25, 0, mn, cp_l);
+   for(var j = 0; j < h/1.25 - 1; j++ ){
+     rotY( 2.4, mn, cp_l);
+     splinePatch(ml, n, sml, 2, Bm_l, Bn_l, cp_l, 1);
+     translate( 0, 1.25, 0, mn, cp_l);
+     var off0 = off;
+     flower3(1 - j*Math.random()/h);
+     rotX_p( -1., off0, off, pt);
+     rotY_p( fi + 1.5, off0, off, pt);
+     translate_p( 0,1.25*(j + 1),0, off0, off, pt);
+     fi += 2.4;
+   }
+   trunk( h - .01, sc0, 1);
+   off0 = off;
+   flower3(.3*Math.random());
+   translate_p( 0,h,0, off0, off, pt);
+}
+
+function flower3(age){
+   var off0 = off;
+   flower(.5*age, .5);
+   rotZ_p( .7, off0, off, pt);
+   rotY_p(-2.4, off0, off, pt);
+   off0 = off;
+   flower(age, 1);
+   rotZ_p( .7, off0, off, pt);
+   rotY_p(2.4, off0, off, pt);
+   off0 = off;
+   flower(.99, 1.2);
+   rotZ_p( .5, off0, off, pt);
+}
+
+function flower(age, tyb){
+   for(var ji = 0; ji < 5; ji++ ){
+    var cp1 = new Float32Array(cp_p);
+    cp1[1] -= .2*age;  cp1[9] += .2*age;  cp1[10] += .2*age;
+    translate( .003*ji,0,0, mp, cp1);
+    rotZ( 1.2*age, mp, cp1);
+    patch_rot(mp, smp, snp, cp1, Bm_p, 2.4*ji, tyb);
+   }
+   for(var ji = 0; ji < 5; ji++ ){
+    var cp1 = new Float32Array(cp_s);
+    cp1[1] -= .74*age;  cp1[5] -= .2*age;  cp1[10] += .2*age;
+    translate( .003*ji,.03*age,0, ms, cp1);
+    rotZ( 2.5*age, ms, cp1);
+    patch_rot(ms, sms, sns, cp1, Bm_s, 2.4*ji, tyb);
+   }
+   stem(0, tyb - .01, 0,  0,0,0);
+
+   var cp1 = new Float32Array([  // "stamen"
+     .15, 0,.03,.03,  .3, 0,0,0,  0,0,.02,-.02,
+     1.5,0,0,0,  .7,.7,.7,.7,   0,0,0,0]);
+   for(var j = 0; j < 6; j++ ){
+     var t0 = off/6, t = t0 + 1;
+     rotY( 1.05, 4, cp1);
+     for(var i = 0; i < 4; i++ ){
+       pt[off++] = cp1[i]; pt[off++] = cp1[i+4] + tyb;
+       pt[off++] = cp1[i+8];
+       pt[off++] = cp1[i+12];  pt[off++] = cp1[i+16];  pt[off++] = cp1[i+20];
+     }
+     ind[pi++] = t++; ind[pi++] = t;  ind[pi++] = t0;
+     ind[pi++] = t++; ind[pi++] = t;  ind[pi++] = t0;
+     ind[pi++] = t++; ind[pi++] = t0+1;  ind[pi++] = t0;
+   }
+}
+
+function patch_rot(m, sm, sn, cp, Bm, rot, tyb){
+  var p = 0, pm = 0,  t = off/6;
+  for(var u = 0; u < sm; u++ ){
+    var pc = 0;
+    for(var l = 0; l < 6; l++ ){
+      var s = 0;
+      for(var i = 0; i < m; i++ ) s += Bm[pm+i]*cp[pc++];
+      pet[l] = s;}
+    pm += m;
+    var x = pet[0], z = pet[2],
+        r = Math.sqrt(x*x + z*z), fi = Math.atan2(z,x);
+    var dfi = 2*fi/(sn - 1), v0 = .5*sn - .5;
+    fi += rot;     
+    for(var v = 0; v < sn; v++ ){
+      pt[off++] = r*Math.cos(fi);   pt[off++] = pet[1] + tyb;
+      pt[off++] = r*Math.sin(fi);
+      fi -= dfi;
+      pt[off++] = pet[3];
+      pt[off++] = pet[4] + (v - v0)*(v - v0)*.15;
+      pt[off++] = pet[5] + (v - v0)*(v - v0)*.15;
+    }
+  }
+  var tn = t + sn;
+  for(var i = 0; i < sm-1; i++ ){
+   for(var j = 0; j < sn-1; j++ ){
+     ind[pi++] = t++;  ind[pi++] = t;  ind[pi++] = tn;
+     ind[pi++] = tn++; ind[pi++] = t;  ind[pi++] = tn;
+   }
+   t++;  tn++;
+  }
+}
+function trunk(h, sc_bot, sc_top){
+   var len = 6;
+   var t = t0 = off/len, tm = t + 6;
+   for(var i = 0; i < 5; i++ ){
+       ind[pi++] = t++;  ind[pi++] = t;  ind[pi++] = tm;
+       ind[pi++] = tm++; ind[pi++] = t;  ind[pi++] = tm;
+   }
+   ind[pi++] = t;  ind[pi++] = t0;  ind[pi++] = tm;
+   ind[pi++] = tm; ind[pi++] = t0;  ind[pi++] = t0 + 6;
+   var b0 = [.05,0,0, .025,0,.044, -.025,0,.044,  -.05,0,0, -.025,0,-.044, .025,0,-.044];
+
+   var u = 0,  c = .4;
+   for(var i = 0; i < 6; i++ ){
+     pt[off++] = sc_bot*b0[u++];  pt[off++] = b0[u++];  pt[off++] = sc_bot*b0[u++];
+     pt[off++] = c;  pt[off++] = c;  pt[off++] = 0;}
+   u = 0;
+   for(var i = 0; i < 6; i++ ){
+     pt[off++] = sc_top*b0[u++];  pt[off++] = b0[u++] + h;  pt[off++] = sc_top*b0[u++];
+     pt[off++] = c;  pt[off++] = c;  pt[off++] = 0;}
+}
+} // end apple_tree
+
+  canvas.resize = function (){
+    c_w = Math.round(.95*window.innerWidth);  c_h = window.innerHeight - 10;
+    canvas.width = c_w;   canvas.height = c_h;
+    gl.viewport(0, 0, c_w, c_h);
+    prMatrix.makeIdentity();
+    prMatrix.perspective(50, c_w/c_h, .05, 500);
+    drawScene();
+  }
+} // end webGLStart
+
+document.onkeypress=function(e){
+ var e = window.event || e;
+ switch ( String.fromCharCode(e.charCode) ){
+   case "q": yRot = 5; break;
+   case "w": transl = .002; break;
+   case "e": yRot = -5; break;
+   case "s": transl = -.002; break;
+ }
+ e.stopPropagation();
+ drawScene();
+}
+function drawScene(){
+  if(readyFrame){
+    readyFrame = false;
+    requestAnimationFrame(drawFrame);
+  }
+}
+function drawFrame(){
+   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+   rotMat.rotate(-yRot/5, 0,1,0);   yRot = 0;
+   mvMatrix.makeIdentity();
+   if (transl == 0) transl = .0003*xRot;
+   xb -= 50*transl*rotMat.m13;
+   zb -= 50*transl*rotMat.m11;
+   xRot = 0;  transl = 0;
+   mvMatrix.translate( -xb, -6, -zb);
+   mvMatrix.multRight( rotMat );
+   mvMatrix.multRight( prMatrix );
+
+   gl.uniform2f( r0_loc, xb, zb );
+   gl.uniformMatrix4fv( mvMatLoc, false, new Float32Array(mvMatrix.getAsArray()) );
+   ext.drawElementsInstancedANGLE(gl.TRIANGLES, pi, gl.UNSIGNED_SHORT, 0, 40);
+
+   readyFrame = true;
+}
+var loader = new THREE.FontLoader();
+loader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', function (font) {
+    var scene = new THREE.Scene();
+
+    // Define text parameters
+    var textParams = {
+        font: font,
+        size: 60,
+        height: 1,
+        curveSegments: 12,
+        bevelEnabled: false
+    };
+
+    function createTextGeometry(text, parameters) {
+        var geometry = new THREE.TextGeometry(text, parameters);
+        // Center the text geometry
+        geometry.computeBoundingBox();
+        var textWidth = geometry.boundingBox.max.x - geometry.boundingBox.min.x;
+        geometry.translate(-textWidth / 2, 0, 0);
+        return geometry;
+    }
+
+    function createTextMesh(text, parameters) {
+        var geometry = createTextGeometry(text, parameters);
+        var material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        var mesh = new THREE.Mesh(geometry, material);
+        return mesh;
+    }
+
+    function addTextToScene(scene, text, x, y, z, parameters) {
+    var textMesh = createTextMesh(text, parameters);
+    
+    // Set the position of the text mesh
+    textMesh.position.set(x, y, z);
+
+    // Log the position for debugging
+    console.log("Text Mesh Position:", textMesh.position);
+
+    // Move the text closer to the camera along the z-axis
+    var distanceFromCamera = 100; // Adjust this value as needed
+    textMesh.position.z = -distanceFromCamera;
+
+    // Log the updated position for debugging
+    console.log("Text Mesh Updated Position:", textMesh.position);
+
+    // Add the text mesh to the scene
+    scene.add(textMesh);
+
+    // Log the scene to see if the text mesh is added
+    console.log("Scene after adding text:", scene);
+}
+
+// Call addTextToScene with the updated parameters
+addTextToScene(scene, "Hello, World!", 0, 0, 0, textParams);
+});
+</script> 
+<body>
+  <!-- Splash screen -->
+  <div id="splashScreen" style="text-align: center; padding-top: 90px;">
+    <h1>Happy Valentine Fiorin Inez Santausa</h1>
+    <h2>Hope We Are Always Have A Good Relationship</h2>
+    <h3>KITAA USAHAIN RUMAH ITU</h3>
+    <h2>here some flower for u</h2>
+    <!-- Loading animation -->
+    <div id="loadingAnimation" style="margin-top: 20px;">
+        <div class="loading-dot"></div>
+        <div class="loading-dot"></div>
+        <div class="loading-dot"></div>
+    </div>
+</div>
+
+  <!-- WebGL canvas -->
+  <div id="webGLCanvas" style="display: none;">
+      <canvas id="canvas" width="1080" height="1920"></canvas>
+      <br>Use your fingers to control model.
+      <p>From willy to fiorin</p>
+  </div>
+
+  <!-- Your existing JavaScript code -->
+  <script type="text/javascript">
+      // Your existing JavaScript code here
+  </script>
+</body>
+</html>
